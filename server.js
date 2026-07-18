@@ -72,11 +72,20 @@ app.use((err, req, res, next) => {
 
 // ============ START SERVER ============
 const server = app.listen(PORT, async () => {
-  console.log(`🚀 Server running on http://localhost:${PORT}`);
+  if (process.env.NODE_ENV === 'development') {
+    console.log(`🚀 Server running on http://localhost:${PORT}`);
   console.log(`📁 Storage path: ${process.env.STORAGE_PATH || './downloads'}`);
   console.log(`🌐 Health check: http://localhost:${PORT}/health`);
   console.log(`📡 API base: http://localhost:${PORT}/api/audio`);
   console.log(`📡 Playlist endpoint: http://localhost:${PORT}/api/audio/playlist/info`);
+  } else {
+    console.log(`🚀 Server running on https://geet-music-backend.onrender.com/`);
+  console.log(`📁 Storage path: ${process.env.STORAGE_PATH || './downloads'}`);
+  console.log(`🌐 Health check: https://geet-music-backend.onrender.com//health`);
+  console.log(`📡 API base: https://geet-music-backend.onrender.com//api/audio`);
+  console.log(`📡 Playlist endpoint: https://geet-music-backend.onrender.com//api/audio/playlist/info`);
+  }
+  
   
   // Clean old files on startup
   await cleanupOldFiles();

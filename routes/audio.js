@@ -16,7 +16,7 @@ import {
 const execAsync = promisify(exec);
 const router = express.Router();
 
-// ============ GET PLAYLIST INFO (Alternative with child_process) ============
+// ============ GET PLAYLIST INFO ============
 router.post('/playlist/info', async (req, res) => {
   const { url } = req.body;
   
@@ -30,7 +30,6 @@ router.post('/playlist/info', async (req, res) => {
   try {
     console.log(`📡 Playlist info request for: ${url}`);
     
-    // Extract playlist ID
     let playlistId = null;
     if (url.includes('list=')) {
       playlistId = url.split('list=')[1].split('&')[0];
@@ -44,19 +43,32 @@ router.post('/playlist/info', async (req, res) => {
 
     console.log(`📡 Playlist ID: ${playlistId}`);
 
-    // Use yt-dlp command with --dump-json
-    const command = `yt-dlp --dump-json --no-warnings --flat-playlist --skip-download "${url}"`;
+    // Use yt-dlp command with --dump-json and cookies if available
+    const cookiesPath = process.env.COOKIES_PATH || './cookies.txt';
+    let cookieOption = '';
+    
+    // Check if cookies file exists
+    try {
+      if (await fs.pathExists(cookiesPath)) {
+        cookieOption = `--cookies "${cookiesPath}"`;
+        console.log('🍪 Using cookies file for authentication');
+      }
+    } catch (error) {
+      console.log('⚠️ Could not check cookies file:', error.message);
+    }
+
+    const command = `yt-dlp --dump-json --no-warnings --flat-playlist --skip-download ${cookieOption} "${url}"`;
     console.log('🔧 Running command:', command);
 
     const { stdout, stderr } = await execAsync(command, { 
-      maxBuffer: 10 * 1024 * 1024 // 10MB buffer
+      maxBuffer: 10 * 1024 * 1024,
+      timeout: 60000 // 60 second timeout
     });
 
     if (stderr && !stderr.includes('warning')) {
       console.warn('⚠️ yt-dlp stderr:', stderr);
     }
 
-    // Parse JSON lines (each video is a separate JSON line)
     const lines = stdout.trim().split('\n').filter(line => line.trim());
     const entries = lines.map(line => {
       try {
@@ -71,7 +83,6 @@ router.post('/playlist/info', async (req, res) => {
       throw new Error('No entries found in playlist');
     }
 
-    // Get playlist title from first entry or from command
     const title = entries[0]?.playlist_title || 'Untitled Playlist';
 
     const songs = entries.map(entry => ({
@@ -95,6 +106,21 @@ router.post('/playlist/info', async (req, res) => {
 
   } catch (error) {
     console.error('Playlist info error:', error);
+    
+    // Check if it's an authentication error
+    if (error.message && (
+      error.message.includes('Sign in to confirm') ||
+      error.message.includes('bot') ||
+      error.message.includes('cookies')
+    )) {
+      return res.status(401).json({
+        success: false,
+        error: 'YouTube requires authentication. Please set up cookies.',
+        message: error.message,
+        requiresAuth: true
+      });
+    }
+    
     return res.status(500).json({
       success: false,
       error: 'Failed to get playlist info',
@@ -102,71 +128,6 @@ router.post('/playlist/info', async (req, res) => {
     });
   }
 });
-
-// ============ DOWNLOAD PLAYLIST ============
-router.post('/playlist/download', async (req, res) => {
-  const { playlistId, songs } = req.body;
-  
-  if (!playlistId || !songs || !Array.isArray(songs) || songs.length === 0) {
-    return res.status(400).json({
-      success: false,
-      error: 'Invalid playlist data'
-    });
-  }
-
-  console.log(`📥 Downloading playlist: ${playlistId} (${songs.length} songs)`);
-
-  try {
-    const results = [];
-    const errors = [];
-
-    for (const song of songs) {
-      try {
-        console.log(`📥 Downloading: ${song.title} (${song.videoId})`);
-        const result = await downloadAudio(song.videoId);
-        
-        const downloadedSong = {
-          id: result.fileName,
-          videoId: song.videoId,
-          title: song.title,
-          artist: song.artist,
-          duration: song.duration,
-          thumbnail: song.thumbnail,
-          fileName: result.fileName,
-          fileSize: result.fileSize,
-          downloadedAt: new Date().toISOString()
-        };
-        
-        results.push(downloadedSong);
-        console.log(`✅ Downloaded: ${song.title}`);
-      } catch (error) {
-        console.error(`❌ Failed to download: ${song.title}`, error.message);
-        errors.push({
-          song: song.title,
-          error: error.message
-        });
-        // Continue with next song
-      }
-    }
-
-    return res.json({
-      success: true,
-      downloaded: results.length,
-      failed: errors.length,
-      results: results,
-      errors: errors
-    });
-
-  } catch (error) {
-    console.error('Playlist download error:', error);
-    return res.status(500).json({
-      success: false,
-      error: 'Failed to download playlist',
-      message: error.message
-    });
-  }
-});
-
 
 // ============ GET AUDIO INFO ============
 router.get('/info/:videoId', async (req, res) => {
@@ -200,8 +161,8 @@ router.get('/info/:videoId', async (req, res) => {
 // ============ DOWNLOAD AUDIO ============
 router.get('/download/:videoId', async (req, res) => {
   const { videoId } = req.params;
-  const cookiesPath = process.env.COOKIES_PATH || null;
-  const autoDelete = req.query.autoDelete !== 'false'; // Default: true
+  const cookiesPath = process.env.COOKIES_PATH || './cookies.txt';
+  const autoDelete = req.query.autoDelete !== 'false';
   
   if (!videoId) {
     return res.status(400).json({
@@ -235,11 +196,22 @@ router.get('/download/:videoId', async (req, res) => {
       });
     }
 
-    // Download audio
-    const result = await downloadAudio(cleanVideoId, cookiesPath);
+    // Check if cookies file exists
+    let cookiePath = null;
+    try {
+      if (await fs.pathExists(cookiesPath)) {
+        cookiePath = cookiesPath;
+        console.log('🍪 Using cookies file for authentication');
+      } else {
+        console.log('⚠️ Cookies file not found, trying without authentication');
+      }
+    } catch (error) {
+      console.log('⚠️ Could not check cookies file:', error.message);
+    }
 
-    // If autoDelete is true and we have a file, return it with a flag
-    // The frontend will delete it after saving to IndexedDB
+    // Download audio
+    const result = await downloadAudio(cleanVideoId, cookiePath);
+
     const response = {
       success: true,
       videoId: cleanVideoId,
@@ -251,11 +223,25 @@ router.get('/download/:videoId', async (req, res) => {
       autoDelete: autoDelete
     };
 
-    // If autoDelete is true, we'll send the file and the frontend will delete it
     return res.json(response);
 
   } catch (error) {
     console.error('Download error:', error);
+    
+    // Check if it's an authentication error
+    if (error.message && (
+      error.message.includes('Sign in to confirm') ||
+      error.message.includes('bot') ||
+      error.message.includes('cookies')
+    )) {
+      return res.status(401).json({
+        success: false,
+        error: 'YouTube requires authentication. Please set up cookies.',
+        message: error.message,
+        requiresAuth: true
+      });
+    }
+    
     return res.status(500).json({
       success: false,
       error: 'Download failed',
@@ -301,6 +287,9 @@ router.post('/playlist/download', async (req, res) => {
         
         results.push(downloadedSong);
         console.log(`✅ Downloaded: ${song.title}`);
+        
+        // Add a small delay between downloads to avoid rate limiting
+        await new Promise(resolve => setTimeout(resolve, 2000));
       } catch (error) {
         console.error(`❌ Failed to download: ${song.title}`, error.message);
         errors.push({
@@ -308,7 +297,6 @@ router.post('/playlist/download', async (req, res) => {
           videoId: song.videoId,
           error: error.message
         });
-        // Continue with next song
       }
     }
 

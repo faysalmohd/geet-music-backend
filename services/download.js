@@ -29,7 +29,6 @@ export async function checkVideoExists(videoId) {
     };
   }
 
-  // Try multiple methods
   const methods = [
     checkViaYTS,
     checkViaOEmbed,
@@ -140,16 +139,13 @@ async function checkViaYouTubePage(videoId) {
 
     const html = await response.text();
     
-    // Check if video is available
     if (html.includes('Video unavailable') || html.includes('This video is private')) {
       throw new Error('Video is private or unavailable');
     }
     
-    // Extract title
     const titleMatch = html.match(/<title>(.*?)<\/title>/);
     const title = titleMatch ? titleMatch[1].replace(' - YouTube', '') : 'Unknown Title';
     
-    // Extract channel name
     const channelMatch = html.match(/"owner":{"name":"(.*?)"/);
     const artist = channelMatch ? channelMatch[1] : 'Unknown Artist';
     
@@ -207,7 +203,6 @@ export async function getAudioInfo(videoId) {
     throw new Error('Invalid video ID');
   }
 
-  // First check if video exists
   const videoCheck = await checkVideoExists(cleanVideoId);
   
   if (!videoCheck.exists) {
@@ -272,28 +267,54 @@ export async function downloadAudio(videoId, cookiesPath = null) {
         'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         'Accept-Language: en-US,en;q=0.5'
       ],
-      ...(cookiesPath && { cookies: cookiesPath }),
-      retries: 3,
-      fragmentRetries: 3,
+      retries: 5,
+      fragmentRetries: 5,
       skipUnavailableFragments: true,
       noCheckCertificates: true,
       preferFreeFormats: true,
-      socketTimeout: 60,
-      extractorRetries: 3,
-      fileAccessRetries: 3,
+      socketTimeout: 120,
+      extractorRetries: 5,
+      fileAccessRetries: 5,
+      // Add throttle to avoid rate limiting
+      sleepInterval: 5,
+      maxSleepInterval: 10
     };
 
+    // Add cookies if available
+    if (cookiesPath) {
+      try {
+        if (await fs.pathExists(cookiesPath)) {
+          console.log('🍪 Using cookies file for authentication');
+          options.cookies = cookiesPath;
+        } else {
+          console.log('⚠️ Cookies file not found at:', cookiesPath);
+        }
+      } catch (error) {
+        console.log('⚠️ Could not check cookies file:', error.message);
+      }
+    }
+
+    // Try downloading with cookies first
     try {
       await youtubedl(`https://www.youtube.com/watch?v=${cleanVideoId}`, options);
     } catch (dlError) {
-      // Check if it's a video unavailable error
-      if (dlError.stderr && dlError.stderr.includes('Video unavailable')) {
-        throw new Error('Video is unavailable or has been removed');
-      }
-      if (dlError.message && dlError.message.includes('cookies')) {
-        console.log('⚠️ Cookie error, retrying without cookies...');
+      console.error('Download error:', dlError);
+      
+      // If cookies failed or not available, try without cookies
+      if (dlError.message && (
+        dlError.message.includes('Sign in to confirm') ||
+        dlError.message.includes('bot') ||
+        dlError.message.includes('cookies')
+      )) {
+        console.log('⚠️ Authentication required. Trying without cookies...');
         delete options.cookies;
-        await youtubedl(`https://www.youtube.com/watch?v=${cleanVideoId}`, options);
+        
+        try {
+          await youtubedl(`https://www.youtube.com/watch?v=${cleanVideoId}`, options);
+        } catch (retryError) {
+          console.error('Retry without cookies also failed:', retryError);
+          throw new Error('YouTube requires authentication. Please provide cookies file.');
+        }
       } else {
         throw dlError;
       }
@@ -320,13 +341,6 @@ export async function downloadAudio(videoId, cookiesPath = null) {
 
   } catch (error) {
     console.error('Download error:', error);
-    if (error.message && (
-      error.message.includes('Sign in to confirm') ||
-      error.message.includes('bot') ||
-      error.message.includes('cookies')
-    )) {
-      throw new Error('YouTube requires authentication. Please provide cookies file.');
-    }
     throw error;
   }
 }

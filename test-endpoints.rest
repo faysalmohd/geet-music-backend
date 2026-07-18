@@ -2,7 +2,7 @@
 ### YT-DLP AUDIO SERVER API TESTS
 ### ============================================
 
-@baseUrl = http://localhost:5000
+@baseUrl = https://geet-music-backend.onrender.com
 @apiUrl = {{baseUrl}}/api/audio
 
 ### ============================================
