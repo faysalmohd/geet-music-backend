@@ -438,8 +438,8 @@ export async function getStorageStats() {
       totalFiles: count,
       totalSize: totalSize,
       totalSizeGB: (totalSize / (1024 * 1024 * 1024)).toFixed(2),
-      maxStorageGB: parseFloat(process.env.MAX_STORAGE_GB || 15),
-      isFull: totalSize > (parseFloat(process.env.MAX_STORAGE_GB || 15) * 1024 * 1024 * 1024)
+      maxStorageGB: parseFloat(process.env.MAX_STORAGE_GB || 0.5),
+      isFull: totalSize > (parseFloat(process.env.MAX_STORAGE_GB || 0.5) * 1024 * 1024 * 1024)
     };
   } catch (error) {
     console.error('Storage stats error:', error);
