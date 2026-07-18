@@ -221,7 +221,7 @@ export async function getAudioInfo(videoId) {
   };
 }
 
-// ============ DOWNLOAD AUDIO (Final Working Version) ============
+// ============ DOWNLOAD AUDIO (Updated for Deno & Proxy) ============
 export async function downloadAudio(videoId, cookiesPath = null) {
   console.log(`📥 Downloading audio for: ${videoId}`);
   
@@ -255,113 +255,80 @@ export async function downloadAudio(videoId, cookiesPath = null) {
 
     console.log(`🔄 Downloading with yt-dlp: ${cleanVideoId}`);
 
-    // Define format options to try
-    const formatOptions = [
-      'bestaudio[ext=m4a]/bestaudio',
-      'bestaudio[ext=webm]/bestaudio',
-      'bestaudio[protocol^=http][protocol!*=dash]',
-      'bestaudio[abr<=128]',
-      'bestaudio'
-    ];
+    console.log(`🔄 Downloading with yt-dlp: ${cleanVideoId}`);
 
-    // Define clients to try
-    const clients = [
-      'web',
-      'android',
-      'ios',
-      'tv',
-      'mweb'
-    ];
+    const proxyUrl = process.env.PROXY_URL || null;
+    if (proxyUrl) {
+      console.log(`🌐 Using proxy: ${proxyUrl}`);
+    }
 
-    let lastError = null;
+    // Build options with Deno and Proxy
+    const options = {
+      output: filePath,
+      format: 'bestaudio',
+      extractAudio: true,
+      audioFormat: 'mp3',
+      audioQuality: 0,
+      noPlaylist: true,
+      addHeader: [
+        'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language: en-US,en;q=0.5'
+      ],
+      retries: 5,
+      fragmentRetries: 5,
+      skipUnavailableFragments: true,
+      noCheckCertificates: true,
+      preferFreeFormats: true,
+      socketTimeout: 120,
+      extractorRetries: 5,
+      fileAccessRetries: 5,
+      sleepInterval: 10,
+      maxSleepInterval: 20,
+      // Force Deno as the JS runtime
+      jsRuntimes: ['deno'],
+      // Use android client (often more lenient)
+      extractorArgs: ['youtube:player-client=android'],
+    };
 
-    for (const formatOpt of formatOptions) {
-      for (const client of clients) {
-        try {
-          console.log(`🔄 Trying ${client} client with format: ${formatOpt}...`);
+    // Add proxy if configured
+    if (proxyUrl) {
+      options.proxy = proxyUrl;
+    }
 
-          const options = {
-            output: filePath,
-            format: formatOpt,
-            extractAudio: true,
-            audioFormat: 'mp3',
-            audioQuality: 0,
-            noPlaylist: true,
-            addHeader: [
-              'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-              'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-              'Accept-Language: en-US,en;q=0.5'
-            ],
-            retries: 5,
-            fragmentRetries: 5,
-            skipUnavailableFragments: true,
-            noCheckCertificates: true,
-            preferFreeFormats: true,
-            socketTimeout: 120,
-            extractorRetries: 5,
-            fileAccessRetries: 5,
-            sleepInterval: 10,
-            maxSleepInterval: 20,
-            extractorArgs: [
-              `youtube:player-client=${client}`,
-              // Skip formats that might be problematic
-              'youtube:skip=po_token',
-              'youtube:skip=dash',
-              'youtube:skip=hls'
-            ]
-          };
-
-          // Add cookies if available
-          if (cookiesPath) {
-            try {
-              if (await fs.pathExists(cookiesPath)) {
-                console.log('🍪 Using cookies file for authentication');
-                options.cookies = cookiesPath;
-              }
-            } catch (error) {
-              console.log('⚠️ Could not check cookies file:', error.message);
-            }
-          }
-
-          await youtubedl(`https://www.youtube.com/watch?v=${cleanVideoId}`, options);
-
-          // If we get here, download succeeded
-          console.log(`✅ Download successful with ${client} client and format: ${formatOpt}`);
-
-          if (!await fs.pathExists(filePath)) {
-            throw new Error('Audio file was not created');
-          }
-
-          const stats = await fs.stat(filePath);
-          if (stats.size === 0) {
-            await fs.remove(filePath);
-            throw new Error('Downloaded file is empty');
-          }
-
-          console.log(`✅ Audio downloaded: ${fileName} (${(stats.size / 1024 / 1024).toFixed(2)} MB)`);
-
-          return {
-            filePath,
-            fileName,
-            fileSize: stats.size,
-            isNew: true
-          };
-
-        } catch (error) {
-          lastError = error;
-          console.log(`❌ ${client} client with format ${formatOpt} failed:`, error.message);
-          
-          // Clean up any partial file
-          if (await fs.pathExists(filePath)) {
-            await fs.remove(filePath);
-          }
+    // Add cookies if available
+    if (cookiesPath) {
+      try {
+        if (await fs.pathExists(cookiesPath)) {
+          console.log('🍪 Using cookies file for authentication');
+          options.cookies = cookiesPath;
         }
+      } catch (error) {
+        console.log('⚠️ Could not check cookies file:', error.message);
       }
     }
 
-    // If all attempts failed
-    console.error('All clients and formats failed to download');
-    throw new Error(lastError || 'Failed to download audio with all available methods');
+    console.log('🔄 Attempting download with Deno runtime...');
+    await youtubedl(`https://www.youtube.com/watch?v=${cleanVideoId}`, options);
+
+    if (!await fs.pathExists(filePath)) {
+      throw new Error('Audio file was not created');
+    }
+
+    const stats = await fs.stat(filePath);
+    if (stats.size === 0) {
+      await fs.remove(filePath);
+      throw new Error('Downloaded file is empty');
+    }
+
+    console.log(`✅ Audio downloaded: ${fileName} (${(stats.size / 1024 / 1024).toFixed(2)} MB)`);
+
+    return {
+      filePath,
+      fileName,
+      fileSize: stats.size,
+      isNew: true
+    };
 
   } catch (error) {
     console.error('Download error:', error);
