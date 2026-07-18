@@ -1,0 +1,171 @@
+### ============================================
+### YT-DLP AUDIO SERVER API TESTS
+### ============================================
+
+@baseUrl = http://localhost:5000
+@apiUrl = {{baseUrl}}/api/audio
+
+### ============================================
+### 1. GET AUDIO INFO
+### ============================================
+
+### 1.1 Get Info - Shape of You
+GET {{apiUrl}}/info/3JWTaaS7LdU
+Accept: application/json
+
+### 1.2 Get Info - Despacito
+GET {{apiUrl}}/info/kJQP7kiw5Fk
+Accept: application/json
+
+### 1.3 Get Info - Invalid Video
+GET {{apiUrl}}/info/invalid
+Accept: application/json
+
+### ============================================
+### 2. DOWNLOAD AUDIO
+### ============================================
+
+### 2.1 Download - Shape of You
+GET {{apiUrl}}/download/3JWTaaS7LdU
+Accept: application/json
+
+### 2.2 Download - Despacito
+GET {{apiUrl}}/download/kJQP7kiw5Fk
+Accept: application/json
+
+### 2.3 Download - Blinding Lights
+GET {{apiUrl}}/download/4NRXx6U8ABQ
+Accept: application/json
+
+### ============================================
+### 3. STREAM AUDIO
+### ============================================
+
+### 3.1 Stream - Replace {fileName} with actual filename from download response
+GET {{apiUrl}}/stream/{fileName}
+Accept: audio/mpeg
+
+### 3.2 Stream with Range Request
+GET {{apiUrl}}/stream/{fileName}
+Range: bytes=0-100000
+Accept: audio/mpeg
+
+### ============================================
+### 4. GET FILE
+### ============================================
+
+### 4.1 Get File (Stream)
+GET {{apiUrl}}/file/{fileName}
+Accept: audio/mpeg
+
+### 4.2 Download File (Force Download)
+GET {{apiUrl}}/file/{fileName}?download=true
+Accept: audio/mpeg
+
+### ============================================
+### 5. DELETE FILE
+### ============================================
+
+### 5.1 Delete File
+DELETE {{apiUrl}}/file/{fileName}
+Accept: application/json
+
+### ============================================
+### 6. STORAGE STATS
+### ============================================
+
+### 6.1 Get Storage Stats
+GET {{apiUrl}}/storage/stats
+Accept: application/json
+
+### ============================================
+### 7. COMPLETE WORKFLOW
+### ============================================
+
+### Step 1: Get info
+GET {{apiUrl}}/info/3JWTaaS7LdU
+
+### Step 2: Download
+GET {{apiUrl}}/download/3JWTaaS7LdU
+# Copy the fileName from response (e.g., "abc123.mp3")
+
+### Step 3: Stream using the fileName from step 2
+GET {{apiUrl}}/stream/8032c128-1fce-43ae-97ce-6a56c7ba3343.mp3
+
+### Step 4: Get file
+GET {{apiUrl}}/file/8032c128-1fce-43ae-97ce-6a56c7ba3343.mp3
+
+### Step 5: Delete file
+DELETE {{apiUrl}}/file/8032c128-1fce-43ae-97ce-6a56c7ba3343.mp3
+
+### ============================================
+### 8. BULK OPERATIONS
+### ============================================
+
+### 8.1 Download Multiple
+GET {{apiUrl}}/download/3JWTaaS7LdU
+GET {{apiUrl}}/download/kJQP7kiw5Fk
+GET {{apiUrl}}/download/4NRXx6U8ABQ
+
+### ============================================
+### 9. ERROR TESTING
+### ============================================
+
+### 9.1 Invalid Video ID
+GET {{apiUrl}}/download/invalid
+Accept: application/json
+
+### 9.2 Non-existent File
+GET {{apiUrl}}/file/nonexistent.mp3
+Accept: audio/mpeg
+
+### 9.3 Delete Non-existent File
+DELETE {{apiUrl}}/file/nonexistent.mp3
+Accept: application/json
+
+### ============================================
+### 10. RESPONSE EXAMPLES
+### ============================================
+
+### Download Response
+# {
+#   "success": true,
+#   "videoId": "3JWTaaS7LdU",
+#   "fileName": "abc123-def456.mp3",
+#   "fileSize": 4123456,
+#   "sizeMB": "3.93",
+#   "downloadUrl": "/api/audio/file/abc123-def456.mp3",
+#   "streamUrl": "/api/audio/stream/abc123-def456.mp3"
+# }
+
+### Info Response
+# {
+#   "success": true,
+#   "info": {
+#     "videoId": "3JWTaaS7LdU",
+#     "title": "Ed Sheeran - Shape of You (Official Music Video)",
+#     "artist": "Ed Sheeran",
+#     "duration": 263,
+#     "durationFormatted": "4:23",
+#     "thumbnail": "https://i.ytimg.com/vi/3JWTaaS7LdU/hqdefault.jpg",
+#     "views": 6214582347
+#   }
+# }
+
+### Storage Stats Response
+# {
+#   "success": true,
+#   "totalFiles": 5,
+#   "totalSize": 12345678,
+#   "totalSizeGB": "11.77",
+#   "maxStorageGB": 15,
+#   "isFull": false
+# }
+
+### Error Response
+# {
+#   "success": false,
+#   "error": "Video not found",
+#   "message": "Video not found: Video is unavailable",
+#   "videoId": "invalid"
+# }
