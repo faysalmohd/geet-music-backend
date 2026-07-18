@@ -221,7 +221,7 @@ export async function getAudioInfo(videoId) {
   };
 }
 
-// ============ DOWNLOAD AUDIO (Updated with PO Token support) ============
+// ============ DOWNLOAD AUDIO (Updated with mweb client support) ============
 export async function downloadAudio(videoId, cookiesPath = null) {
   console.log(`📥 Downloading audio for: ${videoId}`);
   
@@ -276,20 +276,18 @@ export async function downloadAudio(videoId, cookiesPath = null) {
       socketTimeout: 120,
       extractorRetries: 5,
       fileAccessRetries: 5,
-      sleepInterval: 10, // Increased from 5
-      maxSleepInterval: 20, // Increased from 10
-      // Use mweb client which is less restrictive
+      sleepInterval: 10,
+      maxSleepInterval: 20,
+      // Use mweb client first (most lenient)
       extractorArgs: ['youtube:player-client=mweb']
     };
 
     // Add cookies if available
-    let hasCookies = false;
     if (cookiesPath) {
       try {
         if (await fs.pathExists(cookiesPath)) {
           console.log('🍪 Using cookies file for authentication');
           options.cookies = cookiesPath;
-          hasCookies = true;
         } else {
           console.log('⚠️ Cookies file not found at:', cookiesPath);
         }
@@ -298,65 +296,63 @@ export async function downloadAudio(videoId, cookiesPath = null) {
       }
     }
 
-    // Try different client approaches
-    const clients = [
-      { client: 'mweb', label: 'Mobile Web' },
-      { client: 'web', label: 'Desktop Web' },
-      { client: 'android', label: 'Android' },
-      { client: 'ios', label: 'iOS' }
-    ];
-
-    let lastError = null;
-
-    for (const clientConfig of clients) {
+    console.log('🔄 Trying with Mobile Web (mweb) client...');
+    
+    try {
+      // First try with mweb client
+      await youtubedl(`https://www.youtube.com/watch?v=${cleanVideoId}`, options);
+    } catch (error) {
+      console.log('❌ mweb client failed, trying with android client...');
+      
+      // If mweb fails, try android
+      const androidOptions = {
+        ...options,
+        extractorArgs: ['youtube:player-client=android']
+      };
+      
       try {
-        console.log(`🔄 Trying with ${clientConfig.label} client...`);
+        await youtubedl(`https://www.youtube.com/watch?v=${cleanVideoId}`, androidOptions);
+      } catch (androidError) {
+        console.log('❌ android client failed, trying with web client...');
         
-        const clientOptions = {
+        // If android fails, try web
+        const webOptions = {
           ...options,
-          extractorArgs: [`youtube:player-client=${clientConfig.client}`]
+          extractorArgs: ['youtube:player-client=web']
         };
-
-        if (hasCookies) {
-          clientOptions.cookies = cookiesPath;
-        }
-
-        await youtubedl(`https://www.youtube.com/watch?v=${cleanVideoId}`, clientOptions);
         
-        console.log(`✅ Download successful with ${clientConfig.label} client`);
-        
-        if (!await fs.pathExists(filePath)) {
-          throw new Error('Audio file was not created');
-        }
-
-        const stats = await fs.stat(filePath);
-        if (stats.size === 0) {
-          await fs.remove(filePath);
-          throw new Error('Downloaded file is empty');
-        }
-
-        console.log(`✅ Audio downloaded: ${fileName} (${(stats.size / 1024 / 1024).toFixed(2)} MB)`);
-
-        return {
-          filePath,
-          fileName,
-          fileSize: stats.size,
-          isNew: true
-        };
-
-      } catch (error) {
-        lastError = error;
-        console.log(`❌ ${clientConfig.label} client failed:`, error.message);
-        // Clean up any partial file
-        if (await fs.pathExists(filePath)) {
-          await fs.remove(filePath);
+        try {
+          await youtubedl(`https://www.youtube.com/watch?v=${cleanVideoId}`, webOptions);
+        } catch (webError) {
+          console.error('All clients failed');
+          
+          // Check if it's an auth error
+          if (webError.message && webError.message.includes('Sign in to confirm')) {
+            throw new Error('YouTube requires authentication. Please ensure cookies.txt is valid.');
+          }
+          throw webError;
         }
       }
     }
 
-    // If all clients failed
-    console.error('All clients failed to download');
-    throw new Error(lastError || 'Failed to download audio with all available methods');
+    if (!await fs.pathExists(filePath)) {
+      throw new Error('Audio file was not created');
+    }
+
+    const stats = await fs.stat(filePath);
+    if (stats.size === 0) {
+      await fs.remove(filePath);
+      throw new Error('Downloaded file is empty');
+    }
+
+    console.log(`✅ Audio downloaded: ${fileName} (${(stats.size / 1024 / 1024).toFixed(2)} MB)`);
+
+    return {
+      filePath,
+      fileName,
+      fileSize: stats.size,
+      isNew: true
+    };
 
   } catch (error) {
     console.error('Download error:', error);
@@ -438,8 +434,8 @@ export async function getStorageStats() {
       totalFiles: count,
       totalSize: totalSize,
       totalSizeGB: (totalSize / (1024 * 1024 * 1024)).toFixed(2),
-      maxStorageGB: parseFloat(process.env.MAX_STORAGE_GB || 0.5),
-      isFull: totalSize > (parseFloat(process.env.MAX_STORAGE_GB || 0.5) * 1024 * 1024 * 1024)
+      maxStorageGB: parseFloat(process.env.MAX_STORAGE_GB || 15),
+      isFull: totalSize > (parseFloat(process.env.MAX_STORAGE_GB || 15) * 1024 * 1024 * 1024)
     };
   } catch (error) {
     console.error('Storage stats error:', error);
