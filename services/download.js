@@ -221,7 +221,7 @@ export async function getAudioInfo(videoId) {
   };
 }
 
-// ============ DOWNLOAD AUDIO ============
+// ============ DOWNLOAD AUDIO (Updated with PO Token support) ============
 export async function downloadAudio(videoId, cookiesPath = null) {
   console.log(`📥 Downloading audio for: ${videoId}`);
   
@@ -255,6 +255,7 @@ export async function downloadAudio(videoId, cookiesPath = null) {
 
     console.log(`🔄 Downloading with yt-dlp: ${cleanVideoId}`);
 
+    // Build options with all necessary flags
     const options = {
       output: filePath,
       format: 'bestaudio',
@@ -275,17 +276,20 @@ export async function downloadAudio(videoId, cookiesPath = null) {
       socketTimeout: 120,
       extractorRetries: 5,
       fileAccessRetries: 5,
-      // Add throttle to avoid rate limiting
-      sleepInterval: 5,
-      maxSleepInterval: 10
+      sleepInterval: 10, // Increased from 5
+      maxSleepInterval: 20, // Increased from 10
+      // Use mweb client which is less restrictive
+      extractorArgs: ['youtube:player-client=mweb']
     };
 
     // Add cookies if available
+    let hasCookies = false;
     if (cookiesPath) {
       try {
         if (await fs.pathExists(cookiesPath)) {
           console.log('🍪 Using cookies file for authentication');
           options.cookies = cookiesPath;
+          hasCookies = true;
         } else {
           console.log('⚠️ Cookies file not found at:', cookiesPath);
         }
@@ -294,50 +298,65 @@ export async function downloadAudio(videoId, cookiesPath = null) {
       }
     }
 
-    // Try downloading with cookies first
-    try {
-      await youtubedl(`https://www.youtube.com/watch?v=${cleanVideoId}`, options);
-    } catch (dlError) {
-      console.error('Download error:', dlError);
-      
-      // If cookies failed or not available, try without cookies
-      if (dlError.message && (
-        dlError.message.includes('Sign in to confirm') ||
-        dlError.message.includes('bot') ||
-        dlError.message.includes('cookies')
-      )) {
-        console.log('⚠️ Authentication required. Trying without cookies...');
-        delete options.cookies;
+    // Try different client approaches
+    const clients = [
+      { client: 'mweb', label: 'Mobile Web' },
+      { client: 'web', label: 'Desktop Web' },
+      { client: 'android', label: 'Android' },
+      { client: 'ios', label: 'iOS' }
+    ];
+
+    let lastError = null;
+
+    for (const clientConfig of clients) {
+      try {
+        console.log(`🔄 Trying with ${clientConfig.label} client...`);
         
-        try {
-          await youtubedl(`https://www.youtube.com/watch?v=${cleanVideoId}`, options);
-        } catch (retryError) {
-          console.error('Retry without cookies also failed:', retryError);
-          throw new Error('YouTube requires authentication. Please provide cookies file.');
+        const clientOptions = {
+          ...options,
+          extractorArgs: [`youtube:player-client=${clientConfig.client}`]
+        };
+
+        if (hasCookies) {
+          clientOptions.cookies = cookiesPath;
         }
-      } else {
-        throw dlError;
+
+        await youtubedl(`https://www.youtube.com/watch?v=${cleanVideoId}`, clientOptions);
+        
+        console.log(`✅ Download successful with ${clientConfig.label} client`);
+        
+        if (!await fs.pathExists(filePath)) {
+          throw new Error('Audio file was not created');
+        }
+
+        const stats = await fs.stat(filePath);
+        if (stats.size === 0) {
+          await fs.remove(filePath);
+          throw new Error('Downloaded file is empty');
+        }
+
+        console.log(`✅ Audio downloaded: ${fileName} (${(stats.size / 1024 / 1024).toFixed(2)} MB)`);
+
+        return {
+          filePath,
+          fileName,
+          fileSize: stats.size,
+          isNew: true
+        };
+
+      } catch (error) {
+        lastError = error;
+        console.log(`❌ ${clientConfig.label} client failed:`, error.message);
+        // Clean up any partial file
+        if (await fs.pathExists(filePath)) {
+          await fs.remove(filePath);
+        }
       }
     }
 
-    if (!await fs.pathExists(filePath)) {
-      throw new Error('Audio file was not created');
-    }
-
-    const stats = await fs.stat(filePath);
-    if (stats.size === 0) {
-      await fs.remove(filePath);
-      throw new Error('Downloaded file is empty');
-    }
-
-    console.log(`✅ Audio downloaded: ${fileName} (${(stats.size / 1024 / 1024).toFixed(2)} MB)`);
-
-    return {
-      filePath,
-      fileName,
-      fileSize: stats.size,
-      isNew: true
-    };
+    // If all clients failed
+    console.error('All clients failed to download');
+    throw new Error(lastError || 'Failed to download audio with all available methods');
 
   } catch (error) {
     console.error('Download error:', error);
